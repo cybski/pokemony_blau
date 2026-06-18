@@ -50,7 +50,9 @@ def detect_events(old_offer: Offer | None, parsed_offer: ParsedOffer) -> list[di
 
 def should_notify(event: AvailabilityEvent) -> bool:
     return (
-        event.new_status == Offer.Availability.IN_STOCK
+        event.offer.product_id is not None
+        and event.offer.mapping_confirmed
+        and event.new_status == Offer.Availability.IN_STOCK
         and event.previous_status != Offer.Availability.IN_STOCK
     )
 

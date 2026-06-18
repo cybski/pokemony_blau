@@ -9,6 +9,8 @@ from typing import Any
 
 from pydoll.browser import Chrome
 from pydoll.browser.options import ChromiumOptions
+from pydoll.commands import PageCommands
+from pydoll.exceptions import NavigationError
 
 from monitor.models import WatchTarget
 
@@ -123,16 +125,20 @@ async def navigate_pydoll_session(
     session: PydollSession,
     watch_target: WatchTarget,
     url: str | None = None,
+    wait_for_page_load: bool = True,
 ) -> tuple[str, int]:
     wait_seconds = int(watch_target.parser_config.get("pydoll_wait_seconds", 5))
     challenge_wait_seconds = int(
         watch_target.parser_config.get("pydoll_challenge_wait_seconds", 60)
     )
-    await session.tab.go_to(
+    await _go_to(
+        session,
         url or watch_target.url,
         timeout=watch_target.store.timeout_seconds,
+        wait_for_page_load=wait_for_page_load,
     )
-    await asyncio.sleep(wait_seconds)
+    initial_wait_seconds = wait_seconds if wait_for_page_load else min(wait_seconds, 1)
+    await asyncio.sleep(initial_wait_seconds)
     html = await session.tab.page_source
     waited = 0
     while _is_challenge_html(html) and waited < challenge_wait_seconds:
@@ -153,6 +159,7 @@ async def _refresh_cloudflare_api_session(
             session,
             watch_target,
             url=browser_url,
+            wait_for_page_load=False,
         )
         if _is_challenge_html(html):
             raise PydollChallengeError(
@@ -271,3 +278,22 @@ def _is_challenge_html(html: str) -> bool:
 
 def _script_value(result: dict[str, Any]) -> Any:
     return result.get("result", {}).get("result", {}).get("value")
+
+
+async def _go_to(
+    session: PydollSession,
+    url: str,
+    timeout: int,
+    wait_for_page_load: bool,
+) -> None:
+    if wait_for_page_load:
+        await session.tab.go_to(url, timeout=timeout)
+        return
+
+    response = await asyncio.wait_for(
+        session.tab._execute_command(PageCommands.navigate(url)),
+        timeout=timeout,
+    )
+    error_text = response["result"].get("errorText")
+    if error_text:
+        raise NavigationError(url, error_text)

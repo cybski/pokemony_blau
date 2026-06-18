@@ -83,14 +83,29 @@ class OfferAdmin(admin.ModelAdmin):
         "title",
         "store",
         "product",
+        "mapping_confirmed",
         "availability",
         "price",
         "currency",
         "last_seen_at",
         "last_changed_at",
     )
-    search_fields = ("title", "url", "product__name", "store__name")
-    list_filter = ("availability", "currency", "store")
+    list_editable = ("product", "mapping_confirmed")
+    search_fields = (
+        "title",
+        "url",
+        "product__name",
+        "store__name",
+        "raw__slug",
+        "raw__product_id",
+    )
+    list_filter = (
+        ("product", admin.EmptyFieldListFilter),
+        "mapping_confirmed",
+        "availability",
+        "currency",
+        "store",
+    )
     ordering = ("-last_seen_at",)
     readonly_fields = ("created_at", "updated_at", "last_seen_at", "last_changed_at")
 

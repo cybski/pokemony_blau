@@ -46,6 +46,7 @@ class ApiFetchResult:
 class CloudflareApiReplayWooCommerceScraper(BaseScraper):
     parser_name = "cloudflare_api_replay_woocommerce"
     _session_cache: dict[tuple[int, str, str], CloudflareBrowserSession] = {}
+    _session_config_key = "cloudflare_replay_session"
 
     def parse_watch_target(self, watch_target: WatchTarget) -> tuple[list[ParsedOffer], dict]:
         result = self.fetch_products(watch_target)
@@ -79,14 +80,17 @@ class CloudflareApiReplayWooCommerceScraper(BaseScraper):
             str(config.get("pydoll_profile_dir") or f".pydoll/{watch_target.store_id}"),
             request_url,
         )
-        session = self._session_cache.get(cache_key)
+        session = self._session_cache.get(cache_key) or self._load_persisted_session(
+            watch_target,
+            cache_key,
+        )
         refresh_count = 0
         attempts: list[dict[str, Any]] = []
         refreshed = False
 
         if session is None:
             session = self.refresh_session(watch_target, request_url)
-            self._session_cache[cache_key] = session
+            self._store_session(watch_target, cache_key, session)
             refresh_count += 1
             refreshed = True
 
@@ -95,7 +99,7 @@ class CloudflareApiReplayWooCommerceScraper(BaseScraper):
 
         if _needs_refresh(response, refresh_status_codes):
             session = self.refresh_session(watch_target, request_url)
-            self._session_cache[cache_key] = session
+            self._store_session(watch_target, cache_key, session)
             refresh_count += 1
             refreshed = True
             response = self.fetch_api(request_url, session)
@@ -122,6 +126,46 @@ class CloudflareApiReplayWooCommerceScraper(BaseScraper):
             attempts=attempts,
             session_metadata=session.metadata,
         )
+
+    def _load_persisted_session(
+        self,
+        watch_target: WatchTarget,
+        cache_key: tuple[int, str, str],
+    ) -> CloudflareBrowserSession | None:
+        persisted = watch_target.parser_config.get(self._session_config_key)
+        if not isinstance(persisted, dict):
+            return None
+
+        cookies = persisted.get("cookies")
+        request_headers = persisted.get("request_headers")
+        metadata = persisted.get("metadata") or {}
+        if not isinstance(cookies, list) or not isinstance(request_headers, list):
+            return None
+
+        session = CloudflareBrowserSession(
+            cookies=cookies,
+            request_headers=request_headers,
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+        self._session_cache[cache_key] = session
+        return session
+
+    def _store_session(
+        self,
+        watch_target: WatchTarget,
+        cache_key: tuple[int, str, str],
+        session: CloudflareBrowserSession,
+    ) -> None:
+        self._session_cache[cache_key] = session
+
+        parser_config = dict(watch_target.parser_config)
+        parser_config[self._session_config_key] = {
+            "cookies": session.cookies,
+            "request_headers": session.request_headers,
+            "metadata": session.metadata,
+        }
+        watch_target.parser_config = parser_config
+        watch_target.save(update_fields=["parser_config", "updated_at"])
 
     def refresh_session(
         self,

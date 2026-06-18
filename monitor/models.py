@@ -105,6 +105,7 @@ class Offer(TimestampedModel):
         on_delete=models.CASCADE,
         related_name="offers",
     )
+    mapping_confirmed = models.BooleanField(default=False)
     title = models.CharField(max_length=500)
     url = models.URLField()
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -122,8 +123,8 @@ class Offer(TimestampedModel):
         ordering = ["-last_seen_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["store", "watch_target", "url"],
-                name="unique_offer_per_watch_target_url",
+                fields=["store", "url"],
+                name="unique_offer_per_store_url",
             )
         ]
 

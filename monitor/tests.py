@@ -1,7 +1,10 @@
+import asyncio
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -17,6 +20,7 @@ from monitor.scrapers.generic_woocommerce import (
     WooCommerceScraperError,
 )
 from monitor.scrapers.pydoll_browser import CloudflareBrowserSession, pydoll_options
+from monitor.scrapers.pydoll_browser import _go_to
 from monitor.scrapers.registry import get_scraper
 from monitor.services.scheduler import get_due_watch_targets
 from monitor.services.scraper_runner import check_watch_target
@@ -61,7 +65,11 @@ class MonitorServicesTests(TestCase):
 
     @patch("monitor.services.scraper_runner.notify_for_event")
     @patch("monitor.scrapers.generic.GenericScraper.fetch")
-    def test_offer_update_creates_availability_event(self, mock_fetch, mock_notify):
+    def test_offer_update_creates_availability_event_without_unmapped_notify(
+        self,
+        mock_fetch,
+        mock_notify,
+    ):
         watch_target = WatchTarget.objects.create(
             product=self.product,
             store=self.store,
@@ -91,6 +99,185 @@ class MonitorServicesTests(TestCase):
         self.assertEqual(event.previous_status, Offer.Availability.OUT_OF_STOCK)
         self.assertEqual(event.new_status, Offer.Availability.UNKNOWN)
         mock_notify.assert_not_called()
+
+    @patch("monitor.services.scraper_runner.notify_for_event")
+    @patch("monitor.scrapers.generic_woocommerce.GenericWooCommerceScraper.fetch_store_api")
+    def test_mapped_confirmed_in_stock_transition_notifies(
+        self,
+        mock_fetch_store_api,
+        mock_notify,
+    ):
+        self.store.parser_type = Store.ParserType.GENERIC_WOOCOMMERCE
+        self.store.save(update_fields=["parser_type"])
+        watch_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/category",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        Offer.objects.create(
+            product=self.product,
+            mapping_confirmed=True,
+            store=self.store,
+            watch_target=watch_target,
+            title="Pokemon 151 Booster Bundle",
+            url="https://example.com/product",
+            price=Decimal("10.00"),
+            availability=Offer.Availability.OUT_OF_STOCK,
+        )
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "name": "Pokemon 151 Booster Bundle",
+                    "slug": "pokemon-151-booster-bundle",
+                    "permalink": "https://example.com/product",
+                    "is_in_stock": True,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                }
+            ],
+            200,
+        )
+
+        check_watch_target(watch_target.id)
+
+        mock_notify.assert_called_once()
+
+    @patch("monitor.services.scraper_runner.notify_for_event")
+    @patch("monitor.scrapers.generic_woocommerce.GenericWooCommerceScraper.fetch_store_api")
+    def test_mapped_but_unconfirmed_in_stock_transition_does_not_notify(
+        self,
+        mock_fetch_store_api,
+        mock_notify,
+    ):
+        self.store.parser_type = Store.ParserType.GENERIC_WOOCOMMERCE
+        self.store.save(update_fields=["parser_type"])
+        watch_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/category",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        Offer.objects.create(
+            product=self.product,
+            mapping_confirmed=False,
+            store=self.store,
+            watch_target=watch_target,
+            title="Pokemon 151 Booster Bundle",
+            url="https://example.com/product",
+            availability=Offer.Availability.OUT_OF_STOCK,
+        )
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "name": "Pokemon 151 Booster Bundle",
+                    "slug": "pokemon-151-booster-bundle",
+                    "permalink": "https://example.com/product",
+                    "is_in_stock": True,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                }
+            ],
+            200,
+        )
+
+        check_watch_target(watch_target.id)
+
+        mock_notify.assert_not_called()
+
+    @patch("monitor.scrapers.generic_woocommerce.GenericWooCommerceScraper.fetch_store_api")
+    def test_same_store_url_updates_one_offer_across_watch_targets(
+        self,
+        mock_fetch_store_api,
+    ):
+        self.store.parser_type = Store.ParserType.GENERIC_WOOCOMMERCE
+        self.store.save(update_fields=["parser_type"])
+        first_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/category-a",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        second_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/category-b",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "name": "Pokemon 151 Booster Bundle",
+                    "slug": "pokemon-151-booster-bundle",
+                    "permalink": "https://example.com/product",
+                    "is_in_stock": True,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                }
+            ],
+            200,
+        )
+
+        check_watch_target(first_target.id)
+        check_watch_target(second_target.id)
+
+        offer = Offer.objects.get()
+        self.assertEqual(Offer.objects.count(), 1)
+        self.assertEqual(offer.watch_target, second_target)
+        self.assertIsNone(offer.product)
+
+    @patch("monitor.scrapers.generic_woocommerce.GenericWooCommerceScraper.fetch_store_api")
+    def test_existing_manual_mapping_survives_category_check(
+        self,
+        mock_fetch_store_api,
+    ):
+        self.store.parser_type = Store.ParserType.GENERIC_WOOCOMMERCE
+        self.store.save(update_fields=["parser_type"])
+        watch_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/category",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        Offer.objects.create(
+            product=self.product,
+            mapping_confirmed=True,
+            store=self.store,
+            watch_target=watch_target,
+            title="Old title",
+            url="https://example.com/product",
+            availability=Offer.Availability.OUT_OF_STOCK,
+        )
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "name": "New title",
+                    "slug": "pokemon-151-booster-bundle",
+                    "permalink": "https://example.com/product",
+                    "is_in_stock": False,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                }
+            ],
+            200,
+        )
+
+        check_watch_target(watch_target.id)
+
+        offer = Offer.objects.get()
+        self.assertEqual(offer.product, self.product)
+        self.assertTrue(offer.mapping_confirmed)
+        self.assertEqual(offer.title, "New title")
+
+    @patch("monitor.scrapers.generic.GenericScraper.fetch")
+    def test_product_page_maps_new_offer_to_target_product(self, mock_fetch):
+        watch_target = WatchTarget.objects.create(
+            product=self.product,
+            store=self.store,
+            url="https://example.com/product",
+            mode=WatchTarget.Mode.PRODUCT_PAGE,
+        )
+        mock_fetch.return_value = (
+            "<html><head><title>Pokemon 151 Booster Bundle</title></head></html>",
+            200,
+        )
+
+        check_watch_target(watch_target.id)
+
+        offer = Offer.objects.get()
+        self.assertEqual(offer.product, self.product)
+        self.assertFalse(offer.mapping_confirmed)
 
     @patch("monitor.services.scraper_runner.notify_for_event")
     @patch("monitor.scrapers.generic.GenericScraper.fetch")
@@ -179,6 +366,48 @@ class GenericWooCommerceScraperTests(TestCase):
         self.assertEqual(offers[0].price, Decimal("599.99"))
         self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
         self.assertEqual(debug["source"], "woocommerce_store_api")
+
+    @patch.object(GenericWooCommerceScraper, "fetch_store_api")
+    def test_category_page_parses_all_store_api_products(self, mock_fetch_store_api):
+        self.watch_target.product = None
+        self.watch_target.mode = WatchTarget.Mode.CATEGORY_PAGE
+        self.watch_target.url = "https://battlestash.pl/kategoria/pokemon-tcg/"
+        self.watch_target.parser_config = {"api_params": {"category": "712"}}
+        self.watch_target.save(
+            update_fields=["product", "mode", "url", "parser_config", "updated_at"]
+        )
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "id": 123,
+                    "name": "Pokemon TCG Chaos Rising Booster Box",
+                    "slug": "pokemon-tcg-chaos-rising-booster-box",
+                    "permalink": "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+                    "is_in_stock": True,
+                    "prices": {"price": "59999", "currency_minor_unit": 2},
+                },
+                {
+                    "id": 124,
+                    "name": "Pokemon TCG Other Box",
+                    "slug": "pokemon-tcg-other-box",
+                    "permalink": "https://battlestash.pl/produkt/pokemon-tcg-other-box/",
+                    "is_in_stock": False,
+                    "prices": {"price": "19999", "currency_minor_unit": 2},
+                },
+            ],
+            200,
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].raw["product_id"], 123)
+        self.assertEqual(offers[1].raw["slug"], "pokemon-tcg-other-box")
+        self.assertEqual(debug["items_found"], 2)
+        mock_fetch_store_api.assert_called_once_with(
+            "https://battlestash.pl/wp-json/wc/store/v1/products",
+            {"category": "712"},
+        )
 
     @patch.object(GenericWooCommerceScraper, "fetch_product_page")
     @patch.object(GenericWooCommerceScraper, "fetch_store_api")
@@ -348,6 +577,11 @@ class CloudflareApiReplayWooCommerceScraperTests(TestCase):
         self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
         self.assertEqual(debug["source"], "cloudflare_api_replay_woocommerce")
         self.assertEqual(debug["items_found"], 1)
+        self.watch_target.refresh_from_db()
+        self.assertEqual(
+            self.watch_target.parser_config["cloudflare_replay_session"]["cookies"][0]["value"],
+            "clear",
+        )
 
     @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
     @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
@@ -384,6 +618,45 @@ class CloudflareApiReplayWooCommerceScraperTests(TestCase):
         self.assertEqual(offers[0].availability, Offer.Availability.OUT_OF_STOCK)
         self.assertTrue(debug["refreshed"])
         self.assertEqual(debug["refresh_count"], 2)
+        self.watch_target.refresh_from_db()
+        self.assertEqual(
+            self.watch_target.parser_config["cloudflare_replay_session"]["cookies"][0]["value"],
+            "new",
+        )
+
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
+    def test_persisted_session_is_reused_without_refresh(
+        self,
+        mock_refresh_session,
+        mock_fetch_api,
+    ):
+        self.watch_target.parser_config["cloudflare_replay_session"] = {
+            "cookies": self.session.cookies,
+            "request_headers": self.session.request_headers,
+            "metadata": self.session.metadata,
+        }
+        self.watch_target.save(update_fields=["parser_config", "updated_at"])
+        CloudflareApiReplayWooCommerceScraper._session_cache.clear()
+        mock_fetch_api.return_value = _json_response(
+            [
+                {
+                    "id": 123,
+                    "name": "Pokemon TCG Chaos Rising Booster Box",
+                    "slug": "pokemon-tcg-chaos-rising-booster-box",
+                    "is_in_stock": True,
+                    "prices": {"price": "59999", "currency_minor_unit": 2},
+                }
+            ]
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 1)
+        self.assertFalse(debug["refreshed"])
+        mock_refresh_session.assert_not_called()
+        reused_session = mock_fetch_api.call_args.args[1]
+        self.assertEqual(reused_session.cookies[0]["value"], "clear")
 
     @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
     @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
@@ -409,6 +682,40 @@ class CloudflareApiReplayWooCommerceScraperTests(TestCase):
 
         self.assertIsInstance(scraper, CloudflareApiReplayWooCommerceScraper)
 
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
+    def test_without_product_slug_returns_all_api_products(
+        self,
+        mock_refresh_session,
+        mock_fetch_api,
+    ):
+        self.watch_target.parser_config.pop("product_slug")
+        self.watch_target.save(update_fields=["parser_config", "updated_at"])
+        mock_refresh_session.return_value = self.session
+        mock_fetch_api.return_value = _json_response(
+            [
+                {
+                    "id": 123,
+                    "name": "Pokemon TCG Chaos Rising Booster Box",
+                    "slug": "pokemon-tcg-chaos-rising-booster-box",
+                    "is_in_stock": True,
+                    "prices": {"price": "59999", "currency_minor_unit": 2},
+                },
+                {
+                    "id": 124,
+                    "name": "Other Product",
+                    "slug": "other-product",
+                    "is_in_stock": False,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                },
+            ]
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(debug["items_found"], 2)
+
     @patch.object(
         CloudflareApiReplayWooCommerceScraper,
         "refresh_session",
@@ -420,6 +727,103 @@ class CloudflareApiReplayWooCommerceScraperTests(TestCase):
 
         job_run = JobRun.objects.filter(status=JobRun.Status.FAILED).latest("created_at")
         self.assertIn("challenge failed", job_run.error_message)
+
+
+class AddWatchTargetCommandTests(TestCase):
+    def test_product_page_requires_product_name(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "add_watch_target",
+                "BattleStash",
+                "https://battlestash.pl",
+                "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+                mode=WatchTarget.Mode.PRODUCT_PAGE,
+            )
+
+    def test_cloudflare_product_page_gets_default_replay_config_and_product(self):
+        call_command(
+            "add_watch_target",
+            "BattleStash",
+            "https://battlestash.pl",
+            "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+            mode=WatchTarget.Mode.PRODUCT_PAGE,
+            product_name="Pokemon Chaos Rising Booster Box",
+            parser=Store.ParserType.CLOUDFLARE_API_REPLAY_WOOCOMMERCE,
+        )
+
+        watch_target = WatchTarget.objects.get(store__name="BattleStash")
+        self.assertEqual(watch_target.product.name, "Pokemon Chaos Rising Booster Box")
+        self.assertEqual(
+            watch_target.parser_config["api_url"],
+            "https://battlestash.pl/wp-json/wc/store/products",
+        )
+        self.assertEqual(
+            watch_target.parser_config["browser_url"],
+            "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+        )
+        self.assertEqual(
+            watch_target.parser_config["product_slug"],
+            "pokemon-tcg-chaos-rising-booster-box",
+        )
+
+    def test_category_cloudflare_parser_accepts_api_params_without_product_slug(self):
+        call_command(
+            "add_watch_target",
+            "BattleStash",
+            "https://battlestash.pl",
+            "https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/",
+            parser=Store.ParserType.CLOUDFLARE_API_REPLAY_WOOCOMMERCE,
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+            browser_url="https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/",
+            api_param=["category=712", "orderby=date"],
+            refresh_status_code=[401, 403],
+        )
+
+        watch_target = WatchTarget.objects.get(store__name="BattleStash")
+        self.assertEqual(watch_target.mode, WatchTarget.Mode.CATEGORY_PAGE)
+        self.assertIsNone(watch_target.product)
+        self.assertEqual(
+            watch_target.parser_config["browser_url"],
+            "https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/",
+        )
+        self.assertEqual(
+            watch_target.parser_config["api_params"],
+            {"category": "712", "orderby": "date"},
+        )
+        self.assertEqual(watch_target.parser_config["refresh_status_codes"], [401, 403])
+        self.assertNotIn("product_slug", watch_target.parser_config)
+
+    def test_search_generic_woocommerce_persists_api_params_without_product(self):
+        call_command(
+            "add_watch_target",
+            "BattleStash",
+            "https://battlestash.pl",
+            "https://battlestash.pl/?s=chaos",
+            parser=Store.ParserType.GENERIC_WOOCOMMERCE,
+            mode=WatchTarget.Mode.SEARCH_PAGE,
+            api_param=["search=chaos", "per_page=100"],
+        )
+
+        watch_target = WatchTarget.objects.get(store__name="BattleStash")
+        self.assertIsNone(watch_target.product)
+        self.assertEqual(
+            watch_target.parser_config["api_params"],
+            {"search": "chaos", "per_page": "100"},
+        )
+        self.assertNotIn("product_slug", watch_target.parser_config)
+
+
+class PydollBrowserTests(TestCase):
+    def test_go_to_can_skip_full_page_load_wait(self):
+        session = type("Session", (), {})()
+        session.tab = type("Tab", (), {})()
+        session.tab.go_to = AsyncMock()
+        session.tab._execute_command = AsyncMock(return_value={"result": {}})
+
+        asyncio.run(_go_to(session, "https://example.com", timeout=15, wait_for_page_load=False))
+
+        session.tab.go_to.assert_not_called()
+        session.tab._execute_command.assert_awaited_once()
 
 
 def _json_response(payload, status_code: int = 200) -> httpx.Response:

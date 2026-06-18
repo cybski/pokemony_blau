@@ -22,15 +22,32 @@ class GenericWooCommerceScraper(BaseScraper):
 
     def parse_watch_target(self, watch_target: WatchTarget) -> tuple[list[ParsedOffer], dict]:
         config = watch_target.parser_config
-        slug = config.get("product_slug") or _product_slug(watch_target.url)
         api_url = config.get("store_api_url") or (
             f"{watch_target.store.base_url.rstrip('/')}/wp-json/wc/store/v1/products"
         )
         attempts: list[dict] = []
+        is_listing_target = watch_target.mode in (
+            WatchTarget.Mode.CATEGORY_PAGE,
+            WatchTarget.Mode.SEARCH_PAGE,
+        )
+
+        if is_listing_target:
+            products, status_code = self.fetch_store_api(
+                api_url,
+                config.get("api_params") or {},
+            )
+            return [self._parse_api_product(product, watch_target) for product in products], {
+                "http_status": status_code,
+                "parser": self.parser_name,
+                "source": "woocommerce_store_api",
+                "items_found": len(products),
+            }
+
+        slug = config.get("product_slug") or _product_slug(watch_target.url)
 
         if config.get("use_store_api", True):
             try:
-                products, status_code = self.fetch_store_api(api_url, slug)
+                products, status_code = self.fetch_store_api(api_url, {"slug": slug})
                 attempts.append(
                     {
                         "source": "woocommerce_store_api",
@@ -103,10 +120,10 @@ class GenericWooCommerceScraper(BaseScraper):
             f"Attempts: {attempts}"
         )
 
-    def fetch_store_api(self, api_url: str, slug: str) -> tuple[list[dict], int]:
+    def fetch_store_api(self, api_url: str, params: dict) -> tuple[list[dict], int]:
         response = httpx.get(
             api_url,
-            params={"slug": slug},
+            params=params,
             timeout=self.timeout_seconds,
             follow_redirects=True,
             headers=_headers(),

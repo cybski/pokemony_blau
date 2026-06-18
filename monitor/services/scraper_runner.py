@@ -31,16 +31,26 @@ def check_watch_target(watch_target_id: int) -> None:
             for parsed_offer in parsed_offers:
                 old_offer = Offer.objects.filter(
                     store=watch_target.store,
-                    watch_target=watch_target,
                     url=parsed_offer.url,
                 ).first()
 
+                product = old_offer.product if old_offer else None
+                mapping_confirmed = old_offer.mapping_confirmed if old_offer else False
+                if (
+                    watch_target.mode == WatchTarget.Mode.PRODUCT_PAGE
+                    and product is None
+                    and watch_target.product is not None
+                ):
+                    product = watch_target.product
+
                 defaults = {
-                    "product": watch_target.product or (old_offer.product if old_offer else None),
+                    "product": product,
                     "title": parsed_offer.title,
+                    "watch_target": watch_target,
                     "price": parsed_offer.price,
                     "currency": parsed_offer.currency,
                     "availability": parsed_offer.availability,
+                    "mapping_confirmed": mapping_confirmed,
                     "raw": parsed_offer.raw,
                     "last_seen_at": timezone.now(),
                     "last_changed_at": timezone.now(),
@@ -53,7 +63,6 @@ def check_watch_target(watch_target_id: int) -> None:
 
                 offer, created = Offer.objects.update_or_create(
                     store=watch_target.store,
-                    watch_target=watch_target,
                     url=parsed_offer.url,
                     defaults=defaults,
                 )
