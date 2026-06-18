@@ -25,6 +25,11 @@ class Product(TimestampedModel):
 class Store(TimestampedModel):
     class ParserType(models.TextChoices):
         GENERIC = "generic", "Generic"
+        GENERIC_WOOCOMMERCE = "generic_woocommerce", "Generic WooCommerce"
+        CLOUDFLARE_API_REPLAY_WOOCOMMERCE = (
+            "cloudflare_api_replay_woocommerce",
+            "Cloudflare API replay WooCommerce",
+        )
 
     name = models.CharField(max_length=255)
     base_url = models.URLField()

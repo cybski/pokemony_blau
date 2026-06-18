@@ -1,10 +1,23 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+import httpx
 from django.test import TestCase
 from django.utils import timezone
 
 from monitor.models import AvailabilityEvent, JobRun, Offer, Product, Store, WatchTarget
+from monitor.scrapers.cloudflare_api_replay_woocommerce import (
+    CloudflareApiReplayWooCommerceError,
+    CloudflareApiReplayWooCommerceScraper,
+    build_cookie_jar,
+    replay_headers,
+)
+from monitor.scrapers.generic_woocommerce import (
+    GenericWooCommerceScraper,
+    WooCommerceScraperError,
+)
+from monitor.scrapers.pydoll_browser import CloudflareBrowserSession, pydoll_options
+from monitor.scrapers.registry import get_scraper
 from monitor.services.scheduler import get_due_watch_targets
 from monitor.services.scraper_runner import check_watch_target
 
@@ -47,7 +60,7 @@ class MonitorServicesTests(TestCase):
         self.assertEqual(result, [due])
 
     @patch("monitor.services.scraper_runner.notify_for_event")
-    @patch("monitor.services.scraper_runner.GenericScraper.fetch")
+    @patch("monitor.scrapers.generic.GenericScraper.fetch")
     def test_offer_update_creates_availability_event(self, mock_fetch, mock_notify):
         watch_target = WatchTarget.objects.create(
             product=self.product,
@@ -80,7 +93,7 @@ class MonitorServicesTests(TestCase):
         mock_notify.assert_not_called()
 
     @patch("monitor.services.scraper_runner.notify_for_event")
-    @patch("monitor.services.scraper_runner.GenericScraper.fetch")
+    @patch("monitor.scrapers.generic.GenericScraper.fetch")
     def test_unchanged_in_stock_does_not_notify(self, mock_fetch, mock_notify):
         watch_target = WatchTarget.objects.create(
             product=self.product,
@@ -109,7 +122,7 @@ class MonitorServicesTests(TestCase):
         )
         mock_notify.assert_not_called()
 
-    @patch("monitor.services.scraper_runner.GenericScraper.fetch", side_effect=RuntimeError("boom"))
+    @patch("monitor.scrapers.generic.GenericScraper.fetch", side_effect=RuntimeError("boom"))
     def test_failed_check_creates_failed_job_run(self, _mock_fetch):
         watch_target = WatchTarget.objects.create(
             product=self.product,
@@ -123,3 +136,308 @@ class MonitorServicesTests(TestCase):
 
         job_run = JobRun.objects.filter(status=JobRun.Status.FAILED).latest("created_at")
         self.assertIn("boom", job_run.error_message)
+
+
+class GenericWooCommerceScraperTests(TestCase):
+    def setUp(self) -> None:
+        self.product = Product.objects.create(name="Pokemon Chaos Rising Booster Box")
+        self.store = Store.objects.create(
+            name="BattleStash",
+            base_url="https://battlestash.pl",
+            parser_type=Store.ParserType.GENERIC_WOOCOMMERCE,
+        )
+        self.watch_target = WatchTarget.objects.create(
+            product=self.product,
+            store=self.store,
+            url="https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+            mode=WatchTarget.Mode.PRODUCT_PAGE,
+        )
+        self.scraper = GenericWooCommerceScraper()
+
+    @patch.object(GenericWooCommerceScraper, "fetch_store_api")
+    def test_store_api_parses_minor_unit_price_and_stock(self, mock_fetch_store_api):
+        mock_fetch_store_api.return_value = (
+            [
+                {
+                    "id": 123,
+                    "name": "Pokemon TCG Chaos Rising Booster Box",
+                    "slug": "pokemon-tcg-chaos-rising-booster-box",
+                    "permalink": self.watch_target.url,
+                    "is_in_stock": True,
+                    "prices": {
+                        "price": "59999",
+                        "currency_code": "PLN",
+                        "currency_minor_unit": 2,
+                    },
+                }
+            ],
+            200,
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(offers[0].price, Decimal("599.99"))
+        self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
+        self.assertEqual(debug["source"], "woocommerce_store_api")
+
+    @patch.object(GenericWooCommerceScraper, "fetch_product_page")
+    @patch.object(GenericWooCommerceScraper, "fetch_store_api")
+    def test_json_ld_fallback_parses_price_and_stock(
+        self,
+        mock_fetch_store_api,
+        mock_fetch_product_page,
+    ):
+        mock_fetch_store_api.side_effect = WooCommerceScraperError("API blocked")
+        mock_fetch_product_page.return_value = (
+            """
+            <script type="application/ld+json">
+            {
+              "@type": "Product",
+              "name": "Pokemon TCG Chaos Rising Booster Box",
+              "offers": {
+                "@type": "Offer",
+                "url": "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+                "price": "549.90",
+                "priceCurrency": "PLN",
+                "availability": "https://schema.org/OutOfStock"
+              }
+            }
+            </script>
+            """,
+            200,
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(offers[0].price, Decimal("549.90"))
+        self.assertEqual(offers[0].availability, Offer.Availability.OUT_OF_STOCK)
+        self.assertEqual(debug["source"], "product_json_ld")
+
+    @patch.object(GenericWooCommerceScraper, "fetch_product_page_pydoll")
+    @patch.object(GenericWooCommerceScraper, "fetch_product_page")
+    @patch.object(GenericWooCommerceScraper, "fetch_store_api")
+    def test_pydoll_fallback_parses_json_ld(
+        self,
+        mock_fetch_store_api,
+        mock_fetch_product_page,
+        mock_fetch_product_page_pydoll,
+    ):
+        self.watch_target.parser_config = {"use_pydoll": True}
+        self.watch_target.save(update_fields=["parser_config", "updated_at"])
+        mock_fetch_store_api.side_effect = WooCommerceScraperError("API blocked")
+        mock_fetch_product_page.side_effect = WooCommerceScraperError("Page blocked")
+        mock_fetch_product_page_pydoll.return_value = (
+            """
+            <script type="application/ld+json">
+            {
+              "@type": "Product",
+              "name": "Pokemon TCG Chaos Rising Booster Box",
+              "offers": {
+                "@type": "Offer",
+                "price": "519.99",
+                "priceCurrency": "PLN",
+                "availability": "https://schema.org/InStock"
+              }
+            }
+            </script>
+            """,
+            200,
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(offers[0].price, Decimal("519.99"))
+        self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
+        self.assertEqual(offers[0].raw["source"], "pydoll_product_json_ld")
+        self.assertEqual(debug["source"], "pydoll_product_json_ld")
+
+    def test_pydoll_options_use_persistent_profile_and_headed_chrome(self):
+        self.watch_target.parser_config = {"pydoll_profile_dir": ".pydoll/test"}
+
+        options = pydoll_options(self.watch_target)
+
+        self.assertFalse(options.headless)
+        self.assertTrue(
+            any(argument.startswith("--user-data-dir=") for argument in options.arguments)
+        )
+
+
+class CloudflareApiReplayWooCommerceScraperTests(TestCase):
+    def setUp(self) -> None:
+        CloudflareApiReplayWooCommerceScraper._session_cache.clear()
+        self.product = Product.objects.create(name="Pokemon Chaos Rising Booster Box")
+        self.store = Store.objects.create(
+            name="BattleStash",
+            base_url="https://battlestash.pl",
+            parser_type=Store.ParserType.CLOUDFLARE_API_REPLAY_WOOCOMMERCE,
+        )
+        self.watch_target = WatchTarget.objects.create(
+            product=self.product,
+            store=self.store,
+            url="https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+            parser_config={
+                "api_url": "https://battlestash.pl/wp-json/wc/store/products",
+                "api_params": {"category": "712"},
+                "product_slug": "pokemon-tcg-chaos-rising-booster-box",
+            },
+        )
+        self.scraper = CloudflareApiReplayWooCommerceScraper()
+        self.session = CloudflareBrowserSession(
+            cookies=[
+                {
+                    "name": "cf_clearance",
+                    "value": "clear",
+                    "domain": ".battlestash.pl",
+                    "path": "/",
+                }
+            ],
+            request_headers=[
+                {"name": "user-agent", "value": "Chrome"},
+                {"name": "cookie", "value": "secret"},
+                {"name": "accept", "value": "application/json"},
+            ],
+            metadata={"cookies_count": 1, "headers_count": 2},
+        )
+
+    def test_cookie_jar_and_replay_header_filtering(self):
+        jar = build_cookie_jar(self.session.cookies)
+        headers = replay_headers(self.session.request_headers)
+
+        self.assertEqual(jar.get("cf_clearance"), "clear")
+        self.assertEqual(headers["user-agent"], "Chrome")
+        self.assertEqual(headers["accept"], "application/json")
+        self.assertNotIn("cookie", headers)
+
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
+    def test_api_json_parses_minor_unit_price_and_stock(
+        self,
+        mock_refresh_session,
+        mock_fetch_api,
+    ):
+        mock_refresh_session.return_value = self.session
+        mock_fetch_api.return_value = _json_response(
+            [
+                {
+                    "id": 123,
+                    "name": "Pokemon TCG Chaos Rising Booster Box",
+                    "slug": "pokemon-tcg-chaos-rising-booster-box",
+                    "permalink": "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/",
+                    "is_in_stock": True,
+                    "prices": {
+                        "price": "59999",
+                        "currency_code": "PLN",
+                        "currency_minor_unit": 2,
+                    },
+                },
+                {
+                    "id": 124,
+                    "name": "Other Product",
+                    "slug": "other-product",
+                    "is_in_stock": False,
+                    "prices": {"price": "1000", "currency_minor_unit": 2},
+                },
+            ]
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("599.99"))
+        self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
+        self.assertEqual(debug["source"], "cloudflare_api_replay_woocommerce")
+        self.assertEqual(debug["items_found"], 1)
+
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
+    def test_401_or_403_triggers_session_refresh_and_retry(
+        self,
+        mock_refresh_session,
+        mock_fetch_api,
+    ):
+        refreshed_session = CloudflareBrowserSession(
+            cookies=[{"name": "cf_clearance", "value": "new"}],
+            request_headers=[{"name": "user-agent", "value": "Chrome"}],
+            metadata={"cookies_count": 1},
+        )
+        mock_refresh_session.side_effect = [self.session, refreshed_session]
+        mock_fetch_api.side_effect = [
+            _text_response(403, "blocked", content_type="text/html"),
+            _json_response(
+                [
+                    {
+                        "id": 123,
+                        "name": "Pokemon TCG Chaos Rising Booster Box",
+                        "slug": "pokemon-tcg-chaos-rising-booster-box",
+                        "is_in_stock": False,
+                        "prices": {"price": "59999", "currency_minor_unit": 2},
+                    }
+                ]
+            ),
+        ]
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(mock_refresh_session.call_count, 2)
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].availability, Offer.Availability.OUT_OF_STOCK)
+        self.assertTrue(debug["refreshed"])
+        self.assertEqual(debug["refresh_count"], 2)
+
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "fetch_api")
+    @patch.object(CloudflareApiReplayWooCommerceScraper, "refresh_session")
+    def test_cloudflare_html_after_refresh_fails_without_fake_offer(
+        self,
+        mock_refresh_session,
+        mock_fetch_api,
+    ):
+        mock_refresh_session.side_effect = [self.session, self.session]
+        mock_fetch_api.side_effect = [
+            _text_response(200, "<html>Just a moment...</html>", content_type="text/html"),
+            _text_response(200, "<html>cf-chl-token</html>", content_type="text/html"),
+        ]
+
+        with self.assertRaises(CloudflareApiReplayWooCommerceError):
+            self.scraper.parse_watch_target(self.watch_target)
+
+    def test_registry_resolves_cloudflare_api_replay_parser(self):
+        scraper = get_scraper(
+            Store.ParserType.CLOUDFLARE_API_REPLAY_WOOCOMMERCE,
+            timeout_seconds=15,
+        )
+
+        self.assertIsInstance(scraper, CloudflareApiReplayWooCommerceScraper)
+
+    @patch.object(
+        CloudflareApiReplayWooCommerceScraper,
+        "refresh_session",
+        side_effect=RuntimeError("challenge failed"),
+    )
+    def test_failed_refresh_creates_failed_job_run(self, _mock_refresh_session):
+        with self.assertRaises(RuntimeError):
+            check_watch_target(self.watch_target.id)
+
+        job_run = JobRun.objects.filter(status=JobRun.Status.FAILED).latest("created_at")
+        self.assertIn("challenge failed", job_run.error_message)
+
+
+def _json_response(payload, status_code: int = 200) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        json=payload,
+        request=httpx.Request("GET", "https://battlestash.pl/wp-json/wc/store/products"),
+    )
+
+
+def _text_response(
+    status_code: int,
+    text: str,
+    content_type: str = "text/plain",
+) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        text=text,
+        headers={"content-type": content_type},
+        request=httpx.Request("GET", "https://battlestash.pl/wp-json/wc/store/products"),
+    )

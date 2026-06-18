@@ -36,7 +36,7 @@ Preferred stack:
 - RQ or django-rq
 - httpx for normal HTTP requests
 - BeautifulSoup or selectolax for HTML parsing
-- Playwright for JS-rendered pages only
+- Pydoll for JS-rendered pages only
 - Docker Compose for local development
 - Telegram bot and/or Discord webhook for notifications
 
@@ -466,7 +466,7 @@ Build in this order:
 12. RQ worker.
 13. Scheduler.
 14. Store-specific parsers.
-15. Playwright support only where needed.
+15. Pydoll support only where needed.
 
 ## Definition of done for MVP
 

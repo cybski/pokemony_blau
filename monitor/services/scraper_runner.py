@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from monitor.models import AvailabilityEvent, JobRun, Offer, WatchTarget
-from monitor.scrapers.generic import GenericScraper
+from monitor.scrapers.registry import get_scraper
 from monitor.services.availability import detect_events, should_notify
 from monitor.services.notifications import notify_for_event
 
@@ -20,7 +20,10 @@ def check_watch_target(watch_target_id: int) -> None:
     )
 
     try:
-        scraper = GenericScraper(timeout_seconds=watch_target.store.timeout_seconds)
+        scraper = get_scraper(
+            parser_type=watch_target.store.parser_type,
+            timeout_seconds=watch_target.store.timeout_seconds,
+        )
         parsed_offers, debug_payload = scraper.parse_watch_target(watch_target)
 
         created_events: list[AvailabilityEvent] = []

@@ -5,3 +5,5 @@ __pycache__/
 .env
 test_db.sqlite3
 db.sqlite3
+.playwright/
+.pydoll/

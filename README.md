@@ -12,7 +12,7 @@ Private TCG product availability monitor scaffold. Backend only: Django Admin, b
 - `httpx`
 - `beautifulsoup4`
 - `selectolax`
-- Playwright Python scaffold
+- Pydoll browser fallback
 
 ## Local setup
 
@@ -31,14 +31,115 @@ uv run python manage.py runserver
 uv run python manage.py rqworker default
 uv run python manage.py enqueue_due_checks
 uv run python manage.py check_watch_target <watch_target_id>
-uv run playwright install chromium
+uv run python manage.py add_watch_target <product_name> <store_name> <base_url> <product_url> --check
+uv run python manage.py prime_pydoll_profile <watch_target_id>
+uv run python manage.py run_pydoll_monitor <watch_target_id>
 uv run python manage.py test
+```
+
+## Verify BattleStash price monitoring
+
+Start the database, migrate, and create the BattleStash watch target:
+
+```bash
+docker compose up -d
+uv run python manage.py migrate
+uv run python manage.py add_watch_target \
+  "Pokemon Chaos Rising Booster Box" \
+  "BattleStash" \
+  "https://battlestash.pl" \
+  "https://battlestash.pl/produkt/pokemon-tcg-chaos-rising-booster-box/" \
+  --parser cloudflare_api_replay_woocommerce \
+  --poll-interval 15 \
+  --pydoll \
+  --pydoll-challenge-wait-seconds 15
+```
+
+The command prints the new watch target ID. If BattleStash returns a Cloudflare challenge,
+open a headed browser using that ID:
+
+```bash
+uv run python manage.py prime_pydoll_profile <watch_target_id>
+```
+
+Complete any challenge in the browser. Return to the terminal and press Enter. The browser
+session is stored under `.pydoll/`.
+
+Verify price detection:
+
+```bash
+uv run python manage.py check_watch_target <watch_target_id>
+```
+
+The command prints the detected `price`, `availability`, and source. The parser tries:
+
+1. WooCommerce public Store API using the product slug.
+2. Product-page `Product` JSON-LD if the Store API fails.
+3. Branded Google Chrome using the persistent browser profile if enabled.
+4. Cloudflare API replay parser when browser clearance cookies are required for API calls.
+
+If every method is blocked, the check fails and records a failed `JobRun` instead of
+recording false stock data. Inspect the failure in Django Admin or run the check command
+again after priming the profile.
+
+Pydoll connects directly to installed Google Chrome over CDP without WebDriver. The default
+configuration uses headed mode and a persistent browser profile. It does not guarantee
+Cloudflare clearance.
+
+For the most coherent browser identity, keep one headed branded Chrome process open:
+
+```bash
+uv run python manage.py run_pydoll_monitor <watch_target_id>
+```
+
+If a challenge appears, complete it in that Chrome window. The process checks the target
+again at its configured polling interval using the same browser process and profile.
+Pydoll profiles cannot be opened by multiple processes simultaneously.
+
+## Cloudflare API replay parser
+
+Use `cloudflare_api_replay_woocommerce` when a WooCommerce Store API endpoint works
+after a browser clears Cloudflare, but later returns `401`/`403` or challenge HTML
+when the clearance expires.
+
+Example `WatchTarget.parser_config`:
+
+```json
+{
+  "api_url": "https://battlestash.pl/wp-json/wc/store/products",
+  "api_params": {
+    "category": "712"
+  },
+  "browser_url": "https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/",
+  "product_slug": "pokemon-tcg-chaos-rising-booster-box",
+  "refresh_status_codes": [401, 403],
+  "pydoll_profile_dir": ".pydoll/battlestash",
+  "pydoll_headless": false,
+  "pydoll_challenge_wait_seconds": 180
+}
+```
+
+First check opens Chrome through Pydoll, waits for Cloudflare to clear, captures cookies
+and browser-like headers, then replays the API request with `httpx`. Later checks reuse
+in-process cookies/headers and refresh the browser session only when the API is blocked
+again. Refresh is limited to one browser attempt per check.
+
+`JobRun.debug_payload` stores safe metadata only: source, HTTP status, refresh count,
+item count, and session counts. It does not store cookies or replayed request headers.
+
+To poll continuously, run Redis and an RQ worker, then invoke the scheduler command from
+cron every minute:
+
+```bash
+uv run python manage.py rqworker default
+uv run python manage.py enqueue_due_checks
 ```
 
 ## Current limitations
 
-- Generic placeholder scraper only.
-- Availability currently defaults to `unknown`.
+- WooCommerce Store API, product JSON-LD, and Cloudflare API replay are supported.
+- The persistent Chrome monitor requires an active desktop session.
+- Cloudflare clearance cookies expire and may require solving another challenge.
 - Manual product mapping only.
 - Notification delivery is minimal Telegram/Discord integration.
 - Scheduler is a command, not a long-running daemon.
