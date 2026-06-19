@@ -22,6 +22,10 @@ from monitor.scrapers.generic_woocommerce import (
 from monitor.scrapers.pydoll_browser import CloudflareBrowserSession, pydoll_options
 from monitor.scrapers.pydoll_browser import _go_to
 from monitor.scrapers.registry import get_scraper
+from monitor.scrapers.shoper_front_api import (
+    ShoperFrontApiScraper,
+    build_request_url,
+)
 from monitor.services.scheduler import get_due_watch_targets
 from monitor.services.scraper_runner import check_watch_target
 
@@ -812,6 +816,128 @@ class AddWatchTargetCommandTests(TestCase):
         )
         self.assertNotIn("product_slug", watch_target.parser_config)
 
+    def test_category_shoper_parser_persists_api_params_without_product(self):
+        call_command(
+            "add_watch_target",
+            "Strefa TCG",
+            "https://strefa-tcg.pl",
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN",
+            parser=Store.ParserType.SHOPER_FRONT_API,
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+            api_param=["limit=50", "sort=price"],
+        )
+
+        watch_target = WatchTarget.objects.get(store__name="Strefa TCG")
+        self.assertIsNone(watch_target.product)
+        self.assertEqual(watch_target.parser_config["api_params"], {"limit": "50", "sort": "price"})
+
+
+class ShoperFrontApiScraperTests(TestCase):
+    def setUp(self) -> None:
+        self.store = Store.objects.create(
+            name="Strefa TCG",
+            base_url="https://strefa-tcg.pl",
+            parser_type=Store.ParserType.SHOPER_FRONT_API,
+        )
+        self.watch_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN",
+            mode=WatchTarget.Mode.CATEGORY_PAGE,
+        )
+        self.scraper = ShoperFrontApiScraper()
+
+    def test_registry_resolves_shoper_parser(self):
+        scraper = get_scraper(Store.ParserType.SHOPER_FRONT_API, timeout_seconds=15)
+
+        self.assertIsInstance(scraper, ShoperFrontApiScraper)
+
+    def test_request_url_adds_default_limit(self):
+        request_url = build_request_url(self.watch_target.url, {})
+
+        self.assertEqual(
+            request_url,
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN?limit=50",
+        )
+
+    def test_request_url_preserves_query_and_adds_limit(self):
+        request_url = build_request_url(f"{self.watch_target.url}?sort=price", {})
+
+        self.assertEqual(
+            request_url,
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN?sort=price&limit=50",
+        )
+
+    def test_request_url_api_params_override_default_limit(self):
+        request_url = build_request_url(self.watch_target.url, {"limit": "50", "sort": "name"})
+
+        self.assertEqual(
+            request_url,
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN?limit=50&sort=name",
+        )
+
+    @patch("monitor.scrapers.shoper_front_api.httpx.get")
+    def test_list_response_parses_multiple_products(self, mock_get):
+        mock_get.return_value = _shoper_response(
+            [
+                {
+                    "id": 10,
+                    "name": "Pokemon Box",
+                    "url": "/pl/p/pokemon-box/10",
+                    "price": {"gross": "129,99"},
+                    "stock": 3,
+                    "code": "BOX10",
+                },
+                {
+                    "product_id": 11,
+                    "title": "Sold Out Box",
+                    "link": "https://strefa-tcg.pl/pl/p/sold-out-box/11",
+                    "price_float": "99.50",
+                    "buyable": False,
+                    "sku": "BOX11",
+                },
+            ]
+        )
+
+        offers, debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].title, "Pokemon Box")
+        self.assertEqual(offers[0].url, "https://strefa-tcg.pl/pl/p/pokemon-box/10")
+        self.assertEqual(offers[0].price, Decimal("129.99"))
+        self.assertEqual(offers[0].currency, "PLN")
+        self.assertEqual(offers[0].availability, Offer.Availability.IN_STOCK)
+        self.assertEqual(offers[0].raw["product_id"], 10)
+        self.assertEqual(offers[0].raw["code"], "BOX10")
+        self.assertEqual(offers[1].availability, Offer.Availability.OUT_OF_STOCK)
+        self.assertEqual(debug["items_found"], 2)
+        self.assertEqual(
+            mock_get.call_args.args[0],
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN?limit=50",
+        )
+
+    @patch("monitor.scrapers.shoper_front_api.httpx.get")
+    def test_dict_wrapped_response_and_fallback_url(self, mock_get):
+        mock_get.return_value = _shoper_response(
+            {
+                "items": [
+                    {
+                        "id": 12,
+                        "name": "Unknown Stock Box",
+                        "price_value": "49.99",
+                    }
+                ]
+            }
+        )
+
+        offers, _debug = self.scraper.parse_watch_target(self.watch_target)
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(
+            offers[0].url,
+            "https://strefa-tcg.pl/webapi/front/pl_PL/products/PLN/12",
+        )
+        self.assertEqual(offers[0].availability, Offer.Availability.UNKNOWN)
+
 
 class PydollBrowserTests(TestCase):
     def test_go_to_can_skip_full_page_load_wait(self):
@@ -844,4 +970,15 @@ def _text_response(
         text=text,
         headers={"content-type": content_type},
         request=httpx.Request("GET", "https://battlestash.pl/wp-json/wc/store/products"),
+    )
+
+
+def _shoper_response(payload, status_code: int = 200) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        json=payload,
+        request=httpx.Request(
+            "GET",
+            "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN",
+        ),
     )

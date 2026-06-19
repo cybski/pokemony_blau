@@ -114,6 +114,18 @@ uv run python manage.py add_watch_target \
   --api-param "per_page=100"
 ```
 
+For Shoper shops, use the front API category endpoint. The parser adds `limit=50`
+by default and stores discovered products as unmapped offers:
+
+```bash
+uv run python manage.py add_watch_target \
+  "Strefa TCG" \
+  "https://strefa-tcg.pl" \
+  "https://strefa-tcg.pl/webapi/front/pl_PL/categories/177/products/PLN" \
+  --mode category_page \
+  --parser shoper_front_api
+```
+
 In Django Admin, open Offers, assign an internal Product, and check
 `mapping_confirmed`. Notifications are sent only for mapped and confirmed offers.
 

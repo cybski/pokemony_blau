@@ -105,6 +105,9 @@ class Command(BaseCommand):
             if options["refresh_status_code"]:
                 parser_config["refresh_status_codes"] = options["refresh_status_code"]
 
+        if options["parser"] == Store.ParserType.SHOPER_FRONT_API and options["api_param"]:
+            parser_config["api_params"] = _parse_api_params(options["api_param"])
+
         watch_target, created = WatchTarget.objects.update_or_create(
             store=store,
             url=options["watch_url"],

@@ -30,6 +30,7 @@ class Store(TimestampedModel):
             "cloudflare_api_replay_woocommerce",
             "Cloudflare API replay WooCommerce",
         )
+        SHOPER_FRONT_API = "shoper_front_api", "Shoper Front API"
 
     name = models.CharField(max_length=255)
     base_url = models.URLField()

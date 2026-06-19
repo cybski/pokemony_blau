@@ -7,6 +7,7 @@ from monitor.scrapers.cloudflare_api_replay_woocommerce import (
 )
 from monitor.scrapers.generic import GenericScraper
 from monitor.scrapers.generic_woocommerce import GenericWooCommerceScraper
+from monitor.scrapers.shoper_front_api import ShoperFrontApiScraper
 
 
 SCRAPERS: dict[str, type[BaseScraper]] = {
@@ -15,6 +16,7 @@ SCRAPERS: dict[str, type[BaseScraper]] = {
     Store.ParserType.CLOUDFLARE_API_REPLAY_WOOCOMMERCE: (
         CloudflareApiReplayWooCommerceScraper
     ),
+    Store.ParserType.SHOPER_FRONT_API: ShoperFrontApiScraper,
 }
 
 
