@@ -1,4 +1,6 @@
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.widgets import FilteredSelectMultiple
 
 from monitor.jobs import enqueue_watch_target_check
 from monitor.models import (
@@ -12,8 +14,52 @@ from monitor.models import (
 )
 
 
+class OfferMultipleChoiceField(forms.ModelMultipleChoiceField):
+    def label_from_instance(self, obj: Offer) -> str:
+        return f"{obj.store.name}: {obj.title} ({obj.availability})"
+
+
+class ProductAdminForm(forms.ModelForm):
+    offers = OfferMultipleChoiceField(
+        queryset=Offer.objects.none(),
+        required=False,
+        widget=FilteredSelectMultiple("offers", is_stacked=False),
+        help_text=(
+            "Select offers linked to this product. "
+            "Use the filter box above the available offers list to search by text."
+        ),
+    )
+
+    class Meta:
+        model = Product
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["offers"].queryset = Offer.objects.select_related("store").order_by(
+            "store__name",
+            "title",
+        )
+        if self.instance.pk:
+            self.fields["offers"].initial = self.instance.offers.all()
+
+    def _save_m2m(self):
+        super()._save_m2m()
+        if not self.instance.pk:
+            return
+
+        selected_offers = self.cleaned_data["offers"]
+        selected_offer_ids = selected_offers.values_list("id", flat=True)
+        self.instance.offers.exclude(id__in=selected_offer_ids).update(
+            product=None,
+            mapping_confirmed=False,
+        )
+        selected_offers.update(product=self.instance, mapping_confirmed=True)
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+    form = ProductAdminForm
     list_display = ("name", "is_active", "updated_at")
     search_fields = ("name", "notes")
     list_filter = ("is_active",)

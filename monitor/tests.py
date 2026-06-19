@@ -5,9 +5,11 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.contrib.admin.widgets import FilteredSelectMultiple
 from django.test import TestCase
 from django.utils import timezone
 
+from monitor.admin import ProductAdminForm
 from monitor.models import AvailabilityEvent, JobRun, Offer, Product, Store, WatchTarget
 from monitor.scrapers.cloudflare_api_replay_woocommerce import (
     CloudflareApiReplayWooCommerceError,
@@ -28,6 +30,86 @@ from monitor.scrapers.shoper_front_api import (
 )
 from monitor.services.scheduler import get_due_watch_targets
 from monitor.services.scraper_runner import check_watch_target
+
+
+class ProductAdminFormTests(TestCase):
+    def setUp(self) -> None:
+        self.product = Product.objects.create(name="Pokemon 151 Booster Bundle")
+        self.other_product = Product.objects.create(name="Other Product")
+        self.store = Store.objects.create(
+            name="Test Store",
+            base_url="https://example.com",
+        )
+        self.watch_target = WatchTarget.objects.create(
+            store=self.store,
+            url="https://example.com/search",
+            mode=WatchTarget.Mode.SEARCH_PAGE,
+        )
+
+    def create_offer(self, title: str, url: str, product: Product | None = None) -> Offer:
+        return Offer.objects.create(
+            product=product,
+            store=self.store,
+            watch_target=self.watch_target,
+            title=title,
+            url=url,
+            availability=Offer.Availability.OUT_OF_STOCK,
+        )
+
+    def test_offers_field_uses_native_filtered_multiselect(self):
+        offer = self.create_offer(
+            "Pokemon 151 Booster Bundle",
+            "https://example.com/product-1",
+            self.product,
+        )
+
+        form = ProductAdminForm(instance=self.product)
+
+        self.assertIsInstance(form.fields["offers"].widget, FilteredSelectMultiple)
+        self.assertIn(offer, form.fields["offers"].initial)
+        self.assertIn("Pokemon 151", form.fields["offers"].label_from_instance(offer))
+        self.assertIn("Test Store", form.fields["offers"].label_from_instance(offer))
+
+    def test_saving_offers_multiselect_updates_product_links(self):
+        existing_offer = self.create_offer(
+            "Existing mapped offer",
+            "https://example.com/existing",
+            self.product,
+        )
+        selected_offer = self.create_offer(
+            "Selected offer",
+            "https://example.com/selected",
+        )
+        moved_offer = self.create_offer(
+            "Moved offer",
+            "https://example.com/moved",
+            self.other_product,
+        )
+
+        form = ProductAdminForm(
+            data={
+                "name": self.product.name,
+                "notes": self.product.notes,
+                "is_active": "on",
+                "offers": [str(selected_offer.id), str(moved_offer.id)],
+            },
+            instance=self.product,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        saved_product = form.save(commit=False)
+        saved_product.save()
+        form.save_m2m()
+
+        existing_offer.refresh_from_db()
+        selected_offer.refresh_from_db()
+        moved_offer.refresh_from_db()
+        self.assertIsNone(existing_offer.product)
+        self.assertFalse(existing_offer.mapping_confirmed)
+        self.assertEqual(selected_offer.product, self.product)
+        self.assertTrue(selected_offer.mapping_confirmed)
+        self.assertEqual(moved_offer.product, self.product)
+        self.assertTrue(moved_offer.mapping_confirmed)
 
 
 class MonitorServicesTests(TestCase):
