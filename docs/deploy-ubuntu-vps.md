@@ -40,11 +40,21 @@ Commit `pyproject.toml` and `uv.lock`.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 ```
 
-3. Optional but recommended later:
+3. Add production HTTPS settings to `config/settings.py` before enabling SSL:
 
-- Add `CSRF_TRUSTED_ORIGINS=https://your-domain.example` env support.
-- Add `SECURE_SSL_REDIRECT=true` env support.
-- Add `SESSION_COOKIE_SECURE=true` and `CSRF_COOKIE_SECURE=true` for HTTPS-only cookies.
+```python
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "false").lower() == "true"
+SESSION_COOKIE_SECURE = os.getenv("DJANGO_SESSION_COOKIE_SECURE", "false").lower() == "true"
+CSRF_COOKIE_SECURE = os.getenv("DJANGO_CSRF_COOKIE_SECURE", "false").lower() == "true"
+```
+
+Keep these flags `false` until Certbot works, then switch them to `true`.
 
 Without step 2, `collectstatic` will not have a destination for Nginx-served admin static files.
 
@@ -240,6 +250,10 @@ Content:
 DJANGO_SECRET_KEY=replace-with-long-random-secret
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=monitor.example.com,127.0.0.1,localhost
+DJANGO_CSRF_TRUSTED_ORIGINS=https://monitor.example.com
+DJANGO_SECURE_SSL_REDIRECT=false
+DJANGO_SESSION_COOKIE_SECURE=false
+DJANGO_CSRF_COOKIE_SECURE=false
 
 POSTGRES_DB=tcg_monitor
 POSTGRES_USER=tcg_monitor
@@ -466,12 +480,78 @@ sudo systemctl reload nginx
 
 ## 14. HTTPS
 
+Make sure DNS points to the VPS before requesting a certificate:
+
+```bash
+dig +short monitor.example.com
+curl -I http://monitor.example.com
+```
+
+`curl` should reach Nginx over plain HTTP. If it does not, fix DNS, firewall, or Nginx before running Certbot.
+
+Install Certbot if you skipped the base package step:
+
+```bash
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+```
+
+Request a Let's Encrypt certificate and let Certbot edit the Nginx site:
+
 ```bash
 sudo certbot --nginx -d monitor.example.com
+```
+
+Choose the redirect option when Certbot asks whether to redirect HTTP to HTTPS.
+
+Verify Nginx config and reload:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Check HTTPS:
+
+```bash
+curl -I https://monitor.example.com/admin/
+```
+
+Expected result: HTTP response from Django, usually `302` to the admin login page.
+
+Verify automatic renewal:
+
+```bash
+systemctl list-timers | grep certbot
 sudo certbot renew --dry-run
 ```
 
-After HTTPS works, add secure cookie/SSL settings in Django settings if not already added.
+After HTTPS works, enable Django HTTPS flags in `/etc/pokemony-blau.env`:
+
+```env
+DJANGO_SECURE_SSL_REDIRECT=true
+DJANGO_SESSION_COOKIE_SECURE=true
+DJANGO_CSRF_COOKIE_SECURE=true
+```
+
+Restart the web service:
+
+```bash
+sudo systemctl restart pokemony-blau-web
+```
+
+Confirm HTTP redirects to HTTPS:
+
+```bash
+curl -I http://monitor.example.com/admin/
+curl -I https://monitor.example.com/admin/
+```
+
+If admin login returns CSRF errors, check:
+
+- `DJANGO_CSRF_TRUSTED_ORIGINS=https://monitor.example.com`
+- Nginx sends `proxy_set_header X-Forwarded-Proto $scheme;`
+- Django has `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`
 
 ## 15. First production check
 

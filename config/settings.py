@@ -14,6 +14,17 @@ ALLOWED_HOSTS = [
     for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
     if host.strip()
 ]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "false").lower() == "true"
+SESSION_COOKIE_SECURE = (
+    os.getenv("DJANGO_SESSION_COOKIE_SECURE", "false").lower() == "true"
+)
+CSRF_COOKIE_SECURE = os.getenv("DJANGO_CSRF_COOKIE_SECURE", "false").lower() == "true"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -133,3 +144,5 @@ LOGGING = {
         },
     },
 }
+
+STATIC_ROOT = BASE_DIR / "staticfiles"
