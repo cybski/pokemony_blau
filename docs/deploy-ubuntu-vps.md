@@ -92,10 +92,34 @@ returns VPS IP.
 ```bash
 sudo apt update
 sudo apt upgrade -y
-sudo apt install -y nginx postgresql postgresql-contrib redis-server git curl ufw certbot python3-certbot-nginx
+sudo apt install -y nginx postgresql postgresql-contrib redis-server git curl gpg ufw certbot python3-certbot-nginx
 ```
 
 Install `uv` for the app user later, not globally.
+
+### Optional Chrome for headless Pydoll
+
+Install Chrome only if you deliberately run Pydoll-backed targets on the VPS. Browserless targets do not need it.
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt update
+sudo apt install -y google-chrome-stable
+google-chrome-stable --version
+```
+
+If Pydoll still cannot find Chrome, set this in the watch target parser config:
+
+```json
+{
+  "pydoll_binary": "/usr/bin/google-chrome-stable",
+  "pydoll_headless": true
+}
+```
+
+Headless Chrome cannot solve manual Cloudflare challenges. If a target needs a human challenge solve, run that target locally instead of on the VPS.
 
 ## 3. Firewall
 
@@ -150,7 +174,7 @@ Test access:
 sudo -u pokemony ssh -T git@github.com
 ```
 
-GitHub usually returns exit code `1`, but with a success message like:
+GitHub usually returns a message like:
 
 ```text
 Hi <owner>/<repo>! You've successfully authenticated, but GitHub does not provide shell access.
@@ -586,7 +610,7 @@ sudo systemd-run --wait --pty \
 
 Prefer browserless targets.
 
-Generic WooCommerce search/category:
+BattleStash Cloudflare replay with headless Chrome:
 
 ```bash
 sudo systemd-run --wait --pty \
@@ -594,13 +618,16 @@ sudo systemd-run --wait --pty \
   --uid=pokemony --gid=pokemony \
   --working-directory=/srv/pokemony_blau/app \
   /srv/pokemony_blau/.local/bin/uv run python manage.py add_watch_target \
-  "Store Name" \
-  "https://store.example" \
-  "https://store.example/?s=pokemon" \
-  --mode search_page \
-  --parser generic_woocommerce \
-  --api-param "search=pokemon" \
-  --api-param "per_page=100"
+  "BattleStash" \
+  "https://battlestash.pl" \
+  "https://battlestash.pl/kategoria/gry-karciane/pokemon-tcg/" \
+  --mode category_page \
+  --parser cloudflare_api_replay_woocommerce \
+  --api-param "category=712,474" \
+  --poll-interval 300 \
+  --pydoll \
+  --pydoll-headless \
+  --pydoll-binary /usr/bin/google-chrome-stable
 ```
 
 Shoper front API:

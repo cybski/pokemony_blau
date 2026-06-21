@@ -10,9 +10,9 @@
     "semantic_hash": "78fe6e88b19d8ca033189a680d5e750b"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/config/settings.py": {
-    "mtime": 1781285526.9001703,
-    "ast_hash": "49ab95448214bed70fd4d97140234727",
-    "semantic_hash": "49ab95448214bed70fd4d97140234727"
+    "mtime": 1781902180.755287,
+    "ast_hash": "74f8acc76f2cf8f386d29307a2d2cec8",
+    "semantic_hash": "74f8acc76f2cf8f386d29307a2d2cec8"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/config/urls.py": {
     "mtime": 1781285550.0839832,
@@ -35,9 +35,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/admin.py": {
-    "mtime": 1781285527.6436884,
-    "ast_hash": "fbbdeabafcb82691ea0e57cd210bb166",
-    "semantic_hash": "fbbdeabafcb82691ea0e57cd210bb166"
+    "mtime": 1781896006.231753,
+    "ast_hash": "4aaec3a8461daf76dcad0e13a6c783d3",
+    "semantic_hash": "4aaec3a8461daf76dcad0e13a6c783d3"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/apps.py": {
     "mtime": 1781285549.7153568,
@@ -60,9 +60,9 @@
     "semantic_hash": "dc7795986ef684ff4e48ecb4af9a6f05"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/management/commands/check_watch_target.py": {
-    "mtime": 1781285530.4336343,
-    "ast_hash": "3c78e8280625746af9bcf71c0a928e21",
-    "semantic_hash": "3c78e8280625746af9bcf71c0a928e21"
+    "mtime": 1781288499.4066336,
+    "ast_hash": "1d6bf9b9fe273672098ee25a67ce5e03",
+    "semantic_hash": "1d6bf9b9fe273672098ee25a67ce5e03"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/management/commands/enqueue_due_checks.py": {
     "mtime": 1781285530.2742128,
@@ -80,9 +80,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/models.py": {
-    "mtime": 1781285527.2812002,
-    "ast_hash": "b3255196736e51c42ed79143541f2596",
-    "semantic_hash": "b3255196736e51c42ed79143541f2596"
+    "mtime": 1781811319.236587,
+    "ast_hash": "82ad11b6e8d62cecff7a369775621f48",
+    "semantic_hash": "82ad11b6e8d62cecff7a369775621f48"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/__init__.py": {
     "mtime": 1781285529.1361265,
@@ -105,9 +105,9 @@
     "semantic_hash": "fffce5126549d1eae4c670faa6794424"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/services/availability.py": {
-    "mtime": 1781285570.7550604,
-    "ast_hash": "efdcf0fc1fc49b037bd2a851c609d410",
-    "semantic_hash": "efdcf0fc1fc49b037bd2a851c609d410"
+    "mtime": 1781805962.86694,
+    "ast_hash": "e8a9d0433dbde16e622ccee20e3ef412",
+    "semantic_hash": "e8a9d0433dbde16e622ccee20e3ef412"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/services/notifications.py": {
     "mtime": 1781285528.7271445,
@@ -120,28 +120,93 @@
     "semantic_hash": "efdff14798038533796b1b94b5ce76c8"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/services/scraper_runner.py": {
-    "mtime": 1781285528.880721,
-    "ast_hash": "ec449c6f57b1480a48c0f2e6fc9800e7",
-    "semantic_hash": "ec449c6f57b1480a48c0f2e6fc9800e7"
+    "mtime": 1781805984.691163,
+    "ast_hash": "c9c90f8156e03ce621cdb68b4d3649a7",
+    "semantic_hash": "c9c90f8156e03ce621cdb68b4d3649a7"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/tests.py": {
-    "mtime": 1781285528.0054383,
-    "ast_hash": "a37aa4513dceecbaa5b107480a7e7996",
-    "semantic_hash": "a37aa4513dceecbaa5b107480a7e7996"
+    "mtime": 1781895995.5112233,
+    "ast_hash": "e95873da049889e9fe2e56db856c4b01",
+    "semantic_hash": "e95873da049889e9fe2e56db856c4b01"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/AGENTS.md": {
-    "mtime": 1781284937.6827393,
-    "ast_hash": "cc5e643af010f824541049c0f457f986",
-    "semantic_hash": "cc5e643af010f824541049c0f457f986"
+    "mtime": 1781290701.419181,
+    "ast_hash": "76ba76146169a9ec1aeb741f039cbc69",
+    "semantic_hash": "76ba76146169a9ec1aeb741f039cbc69"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/README.md": {
-    "mtime": 1781285531.1157005,
-    "ast_hash": "a72599630f6f8b1b0bd5f882794e8f0d",
-    "semantic_hash": "a72599630f6f8b1b0bd5f882794e8f0d"
+    "mtime": 1781812483.2775745,
+    "ast_hash": "34dedaa1dfb6d6a2070ce5c2544043ce",
+    "semantic_hash": "34dedaa1dfb6d6a2070ce5c2544043ce"
   },
   "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/docker-compose.yml": {
     "mtime": 1781285530.7523773,
     "ast_hash": "0863d91fadf68cc370582e543eace11f",
     "semantic_hash": "0863d91fadf68cc370582e543eace11f"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/management/commands/add_watch_target.py": {
+    "mtime": 1781902125.243901,
+    "ast_hash": "95a65e257f27a45a3ef4a7c4633554ba",
+    "semantic_hash": "95a65e257f27a45a3ef4a7c4633554ba"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/management/commands/prime_pydoll_profile.py": {
+    "mtime": 1781290601.5241492,
+    "ast_hash": "057b0b3b4f127a0c8c2c6b506379904c",
+    "semantic_hash": "057b0b3b4f127a0c8c2c6b506379904c"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/management/commands/run_pydoll_monitor.py": {
+    "mtime": 1781290601.6760097,
+    "ast_hash": "98ca4a995eec39d1070fae4d55a9bc81",
+    "semantic_hash": "98ca4a995eec39d1070fae4d55a9bc81"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/migrations/0002_alter_store_parser_type.py": {
+    "mtime": 1781288556.2622733,
+    "ast_hash": "4bf050a35f03d261f9c14ee83ed4a487",
+    "semantic_hash": "4bf050a35f03d261f9c14ee83ed4a487"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/migrations/0003_add_cloudflare_api_replay_parser_type.py": {
+    "mtime": 1781801901.2130585,
+    "ast_hash": "1c46209a0fac5c916f05cc98f3ec8f3a",
+    "semantic_hash": "1c46209a0fac5c916f05cc98f3ec8f3a"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/migrations/0004_offer_mapping_confirmed_canonical_identity.py": {
+    "mtime": 1781806061.7823236,
+    "ast_hash": "b7f6de349d7356362cfeb3df67c3c926",
+    "semantic_hash": "b7f6de349d7356362cfeb3df67c3c926"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/migrations/0005_add_shoper_front_api_parser_type.py": {
+    "mtime": 1781811392.5762959,
+    "ast_hash": "c1b119f6737d0c1ad0b88c7fdda1d1fc",
+    "semantic_hash": "c1b119f6737d0c1ad0b88c7fdda1d1fc"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/cloudflare_api_replay_woocommerce.py": {
+    "mtime": 1781804776.2770452,
+    "ast_hash": "1cc1cf1fe06db7e947809fbc67eb9430",
+    "semantic_hash": "1cc1cf1fe06db7e947809fbc67eb9430"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/generic_woocommerce.py": {
+    "mtime": 1781806004.8843257,
+    "ast_hash": "f613d5c42bc7de6eeda56cab04824f80",
+    "semantic_hash": "f613d5c42bc7de6eeda56cab04824f80"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/pydoll_browser.py": {
+    "mtime": 1781902125.2737362,
+    "ast_hash": "d9a7ff4a3b62c20d2e7488d8c58e6d81",
+    "semantic_hash": "d9a7ff4a3b62c20d2e7488d8c58e6d81"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/registry.py": {
+    "mtime": 1781811368.7741957,
+    "ast_hash": "652d5a0eba54a063ea3364ffa4074d07",
+    "semantic_hash": "652d5a0eba54a063ea3364ffa4074d07"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/monitor/scrapers/shoper_front_api.py": {
+    "mtime": 1781812466.9376361,
+    "ast_hash": "7995b087a1f82d07a2aa345dad42ef7e",
+    "semantic_hash": "7995b087a1f82d07a2aa345dad42ef7e"
+  },
+  "/Users/piotrcybulski/workspace/pokemony/pokemony_blau/docs/deploy-ubuntu-vps.md": {
+    "mtime": 1781902125.2135117,
+    "ast_hash": "038595f833c728144105db681d4b1f6e",
+    "semantic_hash": "038595f833c728144105db681d4b1f6e"
   }
 }
